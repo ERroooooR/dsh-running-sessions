@@ -45,23 +45,23 @@ window.__ModuleLoader__.load({
 
     const CSS = `
 .dsh-rs-root{display:flex;align-items:center;flex:none;position:relative;z-index:40;pointer-events:auto;app-region:no-drag;-webkit-app-region:no-drag}
-.dsh-rs-pill{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;box-sizing:border-box;border:.5px solid var(--dsw-alias-border-l1);border-radius:999px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font-family:inherit;font-size:12px;font-weight:500;line-height:1;cursor:pointer;transition:background .12s ease,border-color .12s ease}
+.dsh-rs-pill{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 8px;box-sizing:border-box;border:.5px solid var(--dsw-alias-border-l1);border-radius:8px;background:transparent;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:12px;font-weight:400;line-height:1;cursor:pointer;app-region:no-drag;-webkit-app-region:no-drag;transition:background .12s ease,border-color .12s ease}
 .dsh-rs-pill:hover{background:var(--dsw-alias-bg-layer-2);border-color:var(--dsw-alias-border-l2)}
 .dsh-rs-pill:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}
-.dsh-rs-pill[data-open=true]{border-color:var(--dsw-alias-brand-primary);background:var(--dsw-alias-bg-layer-2)}
+.dsh-rs-pill[data-open=true]{background:var(--dsw-alias-bg-layer-2);border-color:var(--dsw-alias-border-l2)}
 .dsh-rs-pill[data-empty=true]{color:var(--dsw-alias-label-secondary)}
-.dsh-rs-dot{width:7px;height:7px;border-radius:50%;flex:none;background:var(--dsw-alias-state-idle-primary)}
+.dsh-rs-dot{width:6px;height:6px;border-radius:50%;flex:none;background:var(--dsw-alias-state-idle-primary)}
 .dsh-rs-dot[data-live=true]{background:var(--dsw-alias-state-success-primary);animation:dsh-rs-pulse 1.8s ease-in-out infinite}
 @keyframes dsh-rs-pulse{0%,100%{opacity:1}50%{opacity:.45}}
-.dsh-rs-count{font-variant-numeric:tabular-nums}
+.dsh-rs-count{font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-secondary)}
 .dsh-rs-caret{font-size:8px;line-height:1;opacity:.55;transform:translateY(.5px)}
-.dsh-rs-menu{position:fixed;z-index:2147483000;box-sizing:border-box;padding:6px;display:flex;flex-direction:column;gap:2px;max-height:min(60vh,420px);overflow:auto;border:.5px solid var(--dsw-alias-border-l1);border-radius:12px;background:var(--dsw-alias-bg-overlay);box-shadow:0 12px 32px rgba(0,0,0,.18)}
+.dsh-rs-menu{position:fixed;z-index:2147483000;box-sizing:border-box;padding:6px;display:flex;flex-direction:column;gap:1px;max-height:min(60vh,420px);overflow:auto;border:.5px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-overlay);box-shadow:0 8px 24px rgba(0,0,0,.12)}
 .dsh-rs-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;padding:4px 8px 6px;color:var(--dsw-alias-label-secondary);font-size:11px;line-height:16px}
 .dsh-rs-headHint{opacity:.7}
-.dsh-rs-row{display:flex;align-items:flex-start;gap:8px;width:100%;box-sizing:border-box;padding:7px 8px;border:none;border-radius:8px;background:transparent;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:13px;line-height:18px;text-align:left;cursor:pointer}
+.dsh-rs-row{display:flex;align-items:flex-start;gap:8px;width:100%;box-sizing:border-box;padding:6px 8px;border:none;border-radius:6px;background:transparent;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:13px;line-height:18px;text-align:left;cursor:pointer}
 .dsh-rs-row:hover{background:var(--dsw-alias-bg-layer-2)}
 .dsh-rs-row:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}
-.dsh-rs-row .dsh-rs-dot{margin-top:5px}
+.dsh-rs-row .dsh-rs-dot{margin-top:6px}
 .dsh-rs-main{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
 .dsh-rs-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dsh-rs-meta{display:flex;align-items:center;gap:6px;min-width:0;color:var(--dsw-alias-label-secondary);font-size:11px;line-height:15px}
@@ -158,6 +158,13 @@ window.__ModuleLoader__.load({
       );
       const count = rows.length;
 
+      /** On open, move focus onto the first row so the list also works from the keyboard. */
+      React.useEffect(() => {
+        if (!open || !menuRef.current) return;
+        const first = menuRef.current.querySelector('.dsh-rs-row');
+        if (first && typeof first.focus === 'function') first.focus();
+      }, [open]);
+
       const place = React.useCallback(() => {
         const button = buttonRef.current;
         if (!button) return;
@@ -215,9 +222,16 @@ window.__ModuleLoader__.load({
 
       const switchTo = React.useCallback((sessionId) => {
         setOpen(false);
-        if (!runtime || !runtime.uiWorkspace) return;
+        if (!runtime) return;
+        // `ctx.uiWorkspace` is a hard dependency (declared in inject); the `get`
+        // form is the optional access shape and covers a late-registered service.
+        const workspace = runtime.uiWorkspace || (typeof runtime.get === 'function' ? runtime.get('uiWorkspace') : undefined);
+        if (!workspace || typeof workspace.openSession !== 'function') {
+          console.error('[running-sessions] uiWorkspace service unavailable');
+          return;
+        }
         try {
-          runtime.uiWorkspace.openSession(sessionId);
+          workspace.openSession(sessionId);
         } catch (error) {
           console.error('[running-sessions] openSession failed', error);
         }
@@ -330,7 +344,7 @@ window.__ModuleLoader__.load({
     }
 
     return {
-      inject: ['slots', 'locale'],
+      inject: ['slots', 'locale', 'uiWorkspace'],
       apply(ctx) {
         runtime = ctx;
         ctx.effect(
