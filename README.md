@@ -7,7 +7,7 @@
 [![platform](https://img.shields.io/badge/platform-DSH%20Web%20%2F%20Desktop-8A2BE2)](#安装)
 [![GitHub stars](https://img.shields.io/github/stars/ERroooooR/dsh-running-sessions?style=social)](https://github.com/ERroooooR/dsh-running-sessions/stargazers)
 
-<img src="./preview.png" alt="胶囊显示在会话标题栏左侧，与官方 chip 同排" width="900" />
+<img src="./preview.png" alt="胶囊显示在会话标题栏左侧，展开后是运行中会话清单与最近完成" width="560" />
 
 </div>
 
