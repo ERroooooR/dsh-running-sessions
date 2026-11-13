@@ -143,15 +143,26 @@ window.__ModuleLoader__.load({
       return '';
     }
 
+    /**
+     * The conversation header is re-created whenever the active session changes, so a
+     * plain component state would drop an already-open menu on the floor. The flag is
+     * therefore kept at module scope — but only for a moment, so a later remount does
+     * not resurrect a stale menu.
+     */
+    let openAcrossMounts = { at: 0, open: false };
+    const OPEN_REVIVE_MS = 3000;
+
     function RunningSessionsPill(props) {
       const t = resolveT(props);
       const sessions = props.useSessions((snapshot) => snapshot);
       const status = props.useSessionStatus((snapshot) => snapshot);
       const workspaces = props.useWorkspaces((snapshot) => snapshot);
 
-      const [open, setOpenState] = React.useState(false);
+      const revived =
+        openAcrossMounts.open && Date.now() - openAcrossMounts.at < OPEN_REVIVE_MS;
+      const [open, setOpenState] = React.useState(revived);
       const [pos, setPos] = React.useState(null);
-      const openRef = React.useRef(false);
+      const openRef = React.useRef(revived);
       const buttonRef = React.useRef(null);
       const menuRef = React.useRef(null);
 
@@ -159,6 +170,7 @@ window.__ModuleLoader__.load({
       const setOpen = React.useCallback((next) => {
         if (openRef.current === next) return;
         openRef.current = next;
+        openAcrossMounts = { at: Date.now(), open: next };
         setOpenState(next);
       }, []);
 
@@ -169,6 +181,33 @@ window.__ModuleLoader__.load({
       const running = groups.running;
       const recent = groups.recent;
       const count = running.length;
+
+      /**
+       * The conversation header is a window-drag surface, and the shell registers its
+       * own capture-phase pointer handling there. A capture listener on `window` runs
+       * before any document-level capture handler, so the pill keeps working no matter
+       * what the header does with the same event.
+       */
+      React.useEffect(() => {
+        const isInsidePill = (target) =>
+          Boolean(buttonRef.current && target && buttonRef.current.contains(target));
+        const onCapture = (event) => {
+          if (!isInsidePill(event.target)) return;
+          if (event.type === 'click') {
+            event.stopPropagation();
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          setOpen(!openRef.current);
+        };
+        window.addEventListener('pointerdown', onCapture, true);
+        window.addEventListener('click', onCapture, true);
+        return () => {
+          window.removeEventListener('pointerdown', onCapture, true);
+          window.removeEventListener('click', onCapture, true);
+        };
+      }, [setOpen]);
 
       /** On open, move focus onto the first row so the list also works from the keyboard. */
       React.useEffect(() => {
