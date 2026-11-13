@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Running sessions",
+    "description": "A persistent pill in the conversation header that lists every running session and switches to it in one click."
+  }
+}
