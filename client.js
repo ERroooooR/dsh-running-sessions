@@ -13,6 +13,7 @@ window.__ModuleLoader__.load({
       'pill.empty.aria': '当前没有正在运行的会话',
       'list.title': '正在运行的会话',
       'list.hint': '点击即切换',
+      'list.recent': '最近完成',
       'list.empty': '现在没有正在运行的会话',
       'row.untitled': '未命名会话',
       'row.pending.approval': '等待授权',
@@ -32,6 +33,7 @@ window.__ModuleLoader__.load({
       'pill.empty.aria': 'No session is running',
       'list.title': 'Running sessions',
       'list.hint': 'Click to switch',
+      'list.recent': 'Recently finished',
       'list.empty': 'No session is running right now',
       'row.untitled': 'Untitled session',
       'row.pending.approval': 'Waiting for approval',
@@ -45,7 +47,7 @@ window.__ModuleLoader__.load({
 
     const CSS = `
 .dsh-rs-root{display:flex;align-items:center;flex:none;position:relative;z-index:40;pointer-events:auto;app-region:no-drag;-webkit-app-region:no-drag}
-.dsh-rs-pill{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 8px;box-sizing:border-box;border:.5px solid var(--dsw-alias-border-l1);border-radius:8px;background:transparent;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:12px;font-weight:400;line-height:1;cursor:pointer;app-region:no-drag;-webkit-app-region:no-drag;transition:background .12s ease,border-color .12s ease}
+.dsh-rs-pill{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 8px;box-sizing:border-box;border:.5px solid var(--dsw-alias-border-l1);border-radius:8px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-family:inherit;font-size:12px;font-weight:400;line-height:1;cursor:pointer;app-region:no-drag;-webkit-app-region:no-drag;transition:background .12s ease,border-color .12s ease}
 .dsh-rs-pill:hover{background:var(--dsw-alias-bg-layer-2);border-color:var(--dsw-alias-border-l2)}
 .dsh-rs-pill:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}
 .dsh-rs-pill[data-open=true]{background:var(--dsw-alias-bg-layer-2);border-color:var(--dsw-alias-border-l2)}
@@ -54,9 +56,12 @@ window.__ModuleLoader__.load({
 .dsh-rs-dot[data-live=true]{background:var(--dsw-alias-state-success-primary);animation:dsh-rs-pulse 1.8s ease-in-out infinite}
 @keyframes dsh-rs-pulse{0%,100%{opacity:1}50%{opacity:.45}}
 .dsh-rs-count{font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-secondary)}
-.dsh-rs-caret{font-size:8px;line-height:1;opacity:.55;transform:translateY(.5px)}
-.dsh-rs-menu{position:fixed;z-index:2147483000;box-sizing:border-box;padding:6px;display:flex;flex-direction:column;gap:1px;max-height:min(60vh,420px);overflow:auto;border:.5px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-overlay);box-shadow:0 8px 24px rgba(0,0,0,.12)}
+.dsh-rs-caret{display:block;flex:none;color:var(--dsw-alias-label-secondary);transition:transform .12s ease}
+.dsh-rs-pill[data-open=true] .dsh-rs-caret{transform:rotate(180deg)}
+.dsh-rs-menu{position:fixed;z-index:2147483000;box-sizing:border-box;padding:6px;display:flex;flex-direction:column;gap:1px;max-height:min(60vh,420px);overflow:auto;border:.5px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-specific-sidebar-fill,var(--dsw-alias-bg-overlay));box-shadow:0 8px 24px rgba(0,0,0,.12)}
 .dsh-rs-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;padding:4px 8px 6px;color:var(--dsw-alias-label-secondary);font-size:11px;line-height:16px}
+.dsh-rs-headSub{padding-top:2px}
+.dsh-rs-divider{height:.5px;flex:none;margin:4px 6px 2px;background:var(--dsw-alias-border-l1)}
 .dsh-rs-headHint{opacity:.7}
 .dsh-rs-row{display:flex;align-items:flex-start;gap:8px;width:100%;box-sizing:border-box;padding:6px 8px;border:none;border-radius:6px;background:transparent;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:13px;line-height:18px;text-align:left;cursor:pointer}
 .dsh-rs-row:hover{background:var(--dsw-alias-bg-layer-2)}
@@ -84,35 +89,40 @@ window.__ModuleLoader__.load({
       };
     }
 
+    /** How many finished sessions the menu offers under the running ones. */
+    const RECENT_LIMIT = 3;
     /**
-     * Running rows, newest activity first. A session counts as running from the
-     * status snapshot, falling back to the roster's own flag.
+     * Build the two menu groups: sessions that are running now, and the most
+     * recently active ones that already finished. A session counts as running
+     * from the status snapshot, falling back to the roster's own flag.
      */
     function readRows(sessions, status, workspaces) {
-      if (!sessions || !sessions.ids) return [];
+      const empty = { running: [], recent: [] };
+      if (!sessions || !sessions.ids) return empty;
       const archived = new Set((workspaces && workspaces.archivedSessionIds) || []);
       const owner = new Map();
       for (const workspace of (workspaces && workspaces.items) || []) {
         for (const sessionId of workspace.sessionIds || []) owner.set(sessionId, workspace.title || '');
       }
-      const rows = [];
+      const running = [];
+      const recent = [];
       for (const sessionId of sessions.ids) {
         const session = sessions.byId[sessionId];
         if (!session || archived.has(sessionId)) continue;
         const state = status ? status.get(sessionId) : undefined;
-        const running = state && typeof state.running === 'boolean' ? state.running : session.running === true;
-        if (!running) continue;
-        const interaction = state && state.pendingInteraction ? state.pendingInteraction.kind : '';
-        rows.push({
+        const isRunning = state && typeof state.running === 'boolean' ? state.running : session.running === true;
+        const row = {
           id: sessionId,
           title: (typeof session.title === 'string' && session.title.trim()) || session.displayTitle || '',
           workspace: owner.get(sessionId) || '',
-          pending: interaction,
+          pending: isRunning && state && state.pendingInteraction ? state.pendingInteraction.kind : '',
           updatedAt: typeof session.updatedAt === 'number' ? session.updatedAt : 0,
-        });
+        };
+        (isRunning ? running : recent).push(row);
       }
-      rows.sort((a, b) => b.updatedAt - a.updatedAt);
-      return rows;
+      running.sort((a, b) => b.updatedAt - a.updatedAt);
+      recent.sort((a, b) => b.updatedAt - a.updatedAt);
+      return { running, recent: recent.slice(0, RECENT_LIMIT) };
     }
 
     function agoText(t, timestamp) {
@@ -152,11 +162,13 @@ window.__ModuleLoader__.load({
         setOpenState(next);
       }, []);
 
-      const rows = React.useMemo(
+      const groups = React.useMemo(
         () => readRows(sessions, status, workspaces),
         [sessions, status, workspaces],
       );
-      const count = rows.length;
+      const running = groups.running;
+      const recent = groups.recent;
+      const count = running.length;
 
       /** On open, move focus onto the first row so the list also works from the keyboard. */
       React.useEffect(() => {
@@ -189,7 +201,7 @@ window.__ModuleLoader__.load({
           return;
         }
         place();
-      }, [open, rows.length, place]);
+      }, [open, running.length, recent.length, place]);
 
       React.useEffect(() => {
         if (!open) return undefined;
@@ -273,11 +285,58 @@ window.__ModuleLoader__.load({
           h('span', { className: 'dsh-rs-dot', 'data-live': count > 0 ? 'true' : 'false' }),
           h('span', null, t('pill.label')),
           h('span', { className: 'dsh-rs-count' }, t('pill.count', { count })),
-          h('span', { className: 'dsh-rs-caret', 'aria-hidden': 'true' }, '▼'),
+          h(
+            'svg',
+            {
+              className: 'dsh-rs-caret',
+              width: 10,
+              height: 10,
+              viewBox: '0 0 10 10',
+              'aria-hidden': 'true',
+              focusable: 'false',
+            },
+            h('path', {
+              d: 'M2.4 3.9 5 6.5 7.6 3.9',
+              fill: 'none',
+              stroke: 'currentColor',
+              strokeWidth: 1.2,
+              strokeLinecap: 'round',
+              strokeLinejoin: 'round',
+            }),
+          ),
         ),
       );
 
       if (!open) return h(React.Fragment, null, styleElement, pill);
+
+      const renderRow = (row, done) =>
+        h(
+          'button',
+          {
+            key: row.id,
+            type: 'button',
+            role: 'menuitem',
+            className: 'dsh-rs-row',
+            onClick: () => switchTo(row.id),
+          },
+          h('span', { className: 'dsh-rs-dot', 'data-live': done ? 'false' : 'true' }),
+          h(
+            'span',
+            { className: 'dsh-rs-main' },
+            h('span', { className: 'dsh-rs-title' }, row.title || t('row.untitled')),
+            h(
+              'span',
+              { className: 'dsh-rs-meta' },
+              row.workspace
+                ? h(React.Fragment, null,
+                    h('span', { className: 'dsh-rs-ws' }, row.workspace),
+                    h('span', { className: 'dsh-rs-sep' }, '·'))
+                : null,
+              h('span', null, agoText(t, row.updatedAt)),
+            ),
+          ),
+          row.pending ? h('span', { className: 'dsh-rs-pending' }, pendingText(t, row.pending)) : null,
+        );
 
       const menu = h(
         'div',
@@ -301,37 +360,15 @@ window.__ModuleLoader__.load({
         ),
         count === 0
           ? h('div', { className: 'dsh-rs-empty' }, t('list.empty'))
-          : rows.map((row) =>
-              h(
-                'button',
-                {
-                  key: row.id,
-                  type: 'button',
-                  role: 'menuitem',
-                  className: 'dsh-rs-row',
-                  onClick: () => switchTo(row.id),
-                },
-                h('span', { className: 'dsh-rs-dot', 'data-live': 'true' }),
-                h(
-                  'span',
-                  { className: 'dsh-rs-main' },
-                  h('span', { className: 'dsh-rs-title' }, row.title || t('row.untitled')),
-                  h(
-                    'span',
-                    { className: 'dsh-rs-meta' },
-                    row.workspace
-                      ? h(React.Fragment, null,
-                          h('span', { className: 'dsh-rs-ws' }, row.workspace),
-                          h('span', { className: 'dsh-rs-sep' }, '·'))
-                      : null,
-                    h('span', null, agoText(t, row.updatedAt)),
-                  ),
-                ),
-                row.pending
-                  ? h('span', { className: 'dsh-rs-pending' }, pendingText(t, row.pending))
-                  : null,
-              ),
-            ),
+          : running.map((row) => renderRow(row, false)),
+        // Finished sessions stay reachable right below the running ones.
+        recent.length > 0
+          ? h('div', { className: 'dsh-rs-divider', role: 'separator' })
+          : null,
+        recent.length > 0
+          ? h('div', { className: 'dsh-rs-head dsh-rs-headSub' }, h('span', null, t('list.recent')))
+          : null,
+        recent.map((row) => renderRow(row, true)),
       );
 
       return h(
