@@ -101,10 +101,33 @@ check('catalog children join the roster before the Host list carries them', () =
 })
 
 check('external catalog entries are not sessions', () => {
-  const sessions = roster([row('main')], {
-    main: { values: { subagentCatalog: [{ id: 'ext', createdAt: 1, mode: 'external' }] } },
-  })
-  assert.equal(classifySessions(sessions).subagentIds.length, 0)
+  // `external` means the child has no local session. Back the id with a real row
+  // so this fails if the skip is removed, instead of passing merely because
+  // nothing in the snapshot carries that id.
+  const sessions = roster(
+    [row('main'), row('ext', { title: 'an unrelated local session' })],
+    { main: { values: { subagentCatalog: [{ id: 'ext', createdAt: 1, mode: 'external' }] } } },
+  )
+  const index = classifySessions(sessions)
+  assert.equal(index.isSubagent('ext'), false)
+  assert.equal(index.subagentIds.length, 0)
+  assert.equal(index.childrenOf.get('main'), undefined, 'an external child is not nested')
+})
+
+check("a catalog naming another session's child does not give it a second owner", () => {
+  const sessions = roster(
+    [row('owner'), row('other'), row('child', { origin: 'subagent', parentId: 'owner' })],
+    // `other`'s projection claims the same child. The row's own parentId is the
+    // durable edge, so the catalog must not add a second one: the child would be
+    // nested under both sessions and its activity would count for each.
+    { other: { values: { subagentCatalog: [{ id: 'child', createdAt: 1, mode: 'one-shot' }] } } },
+  )
+  const status = statusMap({ owner: false, other: false, child: true })
+  const index = classifySessions(sessions)
+  assert.equal(index.parentOf.get('child'), 'owner')
+  assert.equal(index.childrenOf.get('other'), undefined)
+  assert.deepEqual(countRunning(sessions, status, noWorkspaces, CONFIG), { main: 1, sub: 1 })
+  assert.deepEqual(buildRows(sessions, status, noWorkspaces, CONFIG).running.map((entry) => entry.id), ['owner'])
 })
 
 check('a subagent row is titled with the name its parent gave it', () => {
@@ -189,6 +212,26 @@ check('a cycle degrades instead of hanging', () => {
   assert.deepEqual(groups.running, [], 'two subagents with no owner produce no rows')
 })
 
+check('a catalog edge pointing back at an ancestor cannot loop the outline', () => {
+  // `b`'s catalog names `a`, which is already `b`'s ancestor. If every catalog
+  // claim added an edge, `childrenOf` would contain main → a → b → a and building
+  // the outline would recurse until the stack blew up in the header.
+  const sessions = roster(
+    [
+      row('main'),
+      row('a', { origin: 'subagent', parentId: 'main' }),
+      row('b', { origin: 'subagent', parentId: 'a' }),
+    ],
+    { b: { values: { subagentCatalog: [{ id: 'a', createdAt: 1, mode: 'one-shot' }] } } },
+  )
+  const status = statusMap({ main: true, a: false, b: true })
+  const groups = buildRows(sessions, status, noWorkspaces, CONFIG)
+  assert.deepEqual(
+    groups.running[0].children.map((entry) => [entry.id, entry.depth]),
+    [['a', 1], ['b', 2]],
+  )
+})
+
 check('finished sessions land in recent; a subagent keeps its owner running', () => {
   const sessions = roster([
     row('main', { updatedAt: 10 }),
@@ -215,6 +258,25 @@ check('with subagent folding off, the parent falls back to recent', () => {
   assert.deepEqual(groups.recent.map((entry) => entry.id).sort(), ['main', 'other'])
   // A finished owner cannot host a child row; the child is not promoted either.
   assert.equal('children' in (groups.recent[0] || {}), false)
+})
+
+check('with folding off, a running grandchild keeps its quiet middle row', () => {
+  // The switch decides what counts as a running session, not which rows exist.
+  // Filtering the outline by it dropped the middle subagent and took the working
+  // leaf down with it.
+  const off = normalizeConfig({ subagentActivity: false })
+  const sessions = roster([
+    row('main'),
+    row('mid', { origin: 'subagent', parentId: 'main' }),
+    row('leaf', { origin: 'subagent', parentId: 'mid' }),
+  ])
+  const status = statusMap({ main: true, mid: false, leaf: true })
+  const groups = buildRows(sessions, status, noWorkspaces, off)
+  assert.deepEqual(groups.running.map((entry) => entry.id), ['main'])
+  assert.deepEqual(
+    groups.running[0].children.map((entry) => [entry.id, entry.depth]),
+    [['mid', 1], ['leaf', 2]],
+  )
 })
 
 check('children nest under the right owner when two sessions run at once', () => {

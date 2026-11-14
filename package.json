@@ -41,7 +41,7 @@
   "scripts": {
     "build": "node build.mjs",
     "pretest": "node build.mjs --check",
-    "test": "node test/contract.test.mjs && node test/roster.test.mjs && node test/render.test.mjs && node test/integration.test.mjs && node test/bundle.test.mjs",
+    "test": "node test/contract.test.mjs && node test/roster.test.mjs && node test/press.test.mjs && node test/render.test.mjs && node test/integration.test.mjs && node test/bundle.test.mjs",
     "check:pack": "node scripts/check-pack.mjs"
   },
   "publishConfig": {

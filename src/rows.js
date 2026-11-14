@@ -56,19 +56,25 @@ function workspaceOwners(workspaces, config) {
  * subagent appears one indent further in, directly under the row it belongs to,
  * so the menu reads as an outline instead of two unrelated lists.
  *
- * A child is listed when it is active — its own turn is running, or (with
- * subagent activity folded upward) a descendant of it is. The second case matters
- * for the outline: an intermediate subagent whose own turn went quiet but whose
- * child is still working has to stay on screen, or its child would be indented
- * under nothing.
+ * A child is listed when there is work anywhere in its subtree — its own turn is
+ * running, or something below it is. The second case matters for the outline: an
+ * intermediate subagent whose own turn went quiet but whose child is still working
+ * has to stay on screen, or its child would be indented under nothing. That is
+ * deliberately independent of the `subagentActivity` switch: the switch decides
+ * what counts as a running session, not which rows exist.
  */
 function runningChildren(index, activity, hidden, titleOf, pendingOf, parentId) {
   const rows = [];
+  // One row per session, and no unbounded descent: `childrenOf` is a forest by
+  // construction, but a malformed snapshot could still hand back a cycle, and a
+  // stack overflow here would take the whole header down with it.
+  const seen = new Set([parentId]);
   const walk = (ownerId, depth) => {
     const kids = (index.childrenOf.get(ownerId) || [])
-      .filter((id) => index.byId[id] && !hidden(id) && activity.active(id))
+      .filter((id) => !seen.has(id) && index.byId[id] && !hidden(id) && activity.busy(id))
       .sort((left, right) => contract.updatedAtOf(index.byId[right]) - contract.updatedAtOf(index.byId[left]));
     for (const id of kids) {
+      seen.add(id);
       rows.push({
         id,
         title: titleOf(id),

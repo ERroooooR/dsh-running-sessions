@@ -71,16 +71,19 @@ jobs:
       # A version-free asset name keeps
       # https://github.com/.../releases/latest/download/dsh-running-sessions.tgz
       # working across releases; a versioned name would 404 the day the next
-      # release is cut.
+      # release is cut. Packed before the registry is touched, and re-packed on
+      # every run: if the publish succeeds and a later step fails, a re-run has to
+      # be able to finish the release instead of skipping past it.
       - name: Pack a tarball for the GitHub Release
-        if: steps.probe.outputs.skip != 'true'
         run: |
           mkdir -p release
           npm pack --pack-destination release
           mv release/*.tgz release/dsh-running-sessions.tgz
 
+      # The GitHub Release is reconciled on every run, including one where npm was
+      # already updated by a previous attempt.
       - name: Create or refresh the GitHub Release
-        if: github.event_name == 'push' && steps.probe.outputs.skip != 'true'
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

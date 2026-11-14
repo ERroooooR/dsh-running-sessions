@@ -29,42 +29,9 @@ const { countRunning, buildRows, pillVisible } = require('./rows');
 const { reviveOpen, rememberOpen } = require('./mount-state');
 const { placeMenu } = require('./geometry');
 const nav = require('./nav');
+const { attachPressGuard, toggleOnce } = require('./press');
 const { renderPill } = require('./view/pill');
 const { renderMenu } = require('./view/menu');
-
-/**
- * One press must toggle the menu exactly once.
- *
- * Two handlers can observe the same pointer press: a capture listener on `window`
- * (needed because the header is a window-drag surface that handles the event
- * before bubbling reaches the button) and the button's own React handler (the only
- * path when no drag surface is installed). The first handler claims the press and
- * the second becomes a no-op, so the menu cannot open and immediately close.
- *
- * The claim is tracked in a `WeakSet` keyed on the *native* event rather than by
- * writing a property onto it. Two reasons: the capture listener sees the DOM event
- * while React hands its handler a `SyntheticEvent` wrapper, so the two paths must
- * agree on one key; and a host event object is not guaranteed extensible, where a
- * write would fail silently and quietly disable the guard.
- */
-const claimedPresses = new WeakSet();
-
-/** Toggle once per press; the same press seen again by another handler is ignored. */
-function toggleOnce(event, flip) {
-  // No event means nothing to correlate, so the call is honoured as-is.
-  if (!event) {
-    flip();
-    return;
-  }
-  const press = event.nativeEvent || event;
-  if (typeof press !== 'object' && typeof press !== 'function') {
-    flip();
-    return;
-  }
-  if (claimedPresses.has(press)) return;
-  claimedPresses.add(press);
-  flip();
-}
 
 /** True once the missing-prop case has been logged, so it is reported only once. */
 let missingPropReported = false;
@@ -178,26 +145,12 @@ function SessionPill(props) {
    * React handler uses, so the two entry points cannot toggle one press twice.
    */
   React.useEffect(() => {
-    const pageWindow = platform.view();
-    if (!pageWindow || typeof pageWindow.addEventListener !== 'function') return undefined;
     const isInsidePill = (target) =>
       Boolean(buttonRef.current && target && buttonRef.current.contains(target));
-    const onCapture = (event) => {
-      if (!isInsidePill(event.target)) return;
-      if (event.type === 'click') {
-        event.stopPropagation();
-        return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-      toggleOnce(event, () => setOpen(!openRef.current));
-    };
-    pageWindow.addEventListener('pointerdown', onCapture, true);
-    pageWindow.addEventListener('click', onCapture, true);
-    return () => {
-      pageWindow.removeEventListener('pointerdown', onCapture, true);
-      pageWindow.removeEventListener('click', onCapture, true);
-    };
+    return attachPressGuard(platform.view(), {
+      isInside: isInsidePill,
+      toggle: () => setOpen(!openRef.current),
+    });
   }, [setOpen]);
 
   /** On open, move focus onto the first row so the list also works from the keyboard. */
@@ -309,7 +262,9 @@ function SessionPill(props) {
     onKeyDown: (event) => {
       if (event.key !== 'Enter' && event.key !== ' ') return;
       event.preventDefault();
-      setOpen(!openRef.current);
+      // Through the same guard as a press: the browser then emits a click for
+      // this key press, and that echo must not toggle a second time.
+      toggleOnce(event, () => setOpen(!openRef.current));
     },
   });
   if (!open) return pill;

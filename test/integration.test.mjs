@@ -300,6 +300,14 @@ check('only platform.js and style.js reach for a page global directly', () => {
   assert.deepEqual(offenders, [], `modules reaching past the platform adapter: ${offenders.join(', ')}`)
 })
 
+check('the pill wires its press handling through the tested guard', () => {
+  // The guard lives in `press.js` so a test can drive it directly; this catches
+  // the wiring being dropped while the module and its own checks stay green.
+  const component = files.find((file) => file.name === 'component.js')
+  assert.ok(component, 'component.js is part of the tree')
+  assert.match(stripComments(component.text), /\battachPressGuard\(/)
+})
+
 /** The check files themselves, so the test seam counts as a real consumer. */
 const testDir = path.join(root, 'test')
 const testFiles = (await readdir(testDir))

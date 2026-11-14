@@ -74,42 +74,9 @@ const { countRunning, buildRows, pillVisible } = require('./rows');
 const { reviveOpen, rememberOpen } = require('./mount-state');
 const { placeMenu } = require('./geometry');
 const nav = require('./nav');
+const { attachPressGuard, toggleOnce } = require('./press');
 const { renderPill } = require('./view/pill');
 const { renderMenu } = require('./view/menu');
-
-/**
- * One press must toggle the menu exactly once.
- *
- * Two handlers can observe the same pointer press: a capture listener on `window`
- * (needed because the header is a window-drag surface that handles the event
- * before bubbling reaches the button) and the button's own React handler (the only
- * path when no drag surface is installed). The first handler claims the press and
- * the second becomes a no-op, so the menu cannot open and immediately close.
- *
- * The claim is tracked in a `WeakSet` keyed on the *native* event rather than by
- * writing a property onto it. Two reasons: the capture listener sees the DOM event
- * while React hands its handler a `SyntheticEvent` wrapper, so the two paths must
- * agree on one key; and a host event object is not guaranteed extensible, where a
- * write would fail silently and quietly disable the guard.
- */
-const claimedPresses = new WeakSet();
-
-/** Toggle once per press; the same press seen again by another handler is ignored. */
-function toggleOnce(event, flip) {
-  // No event means nothing to correlate, so the call is honoured as-is.
-  if (!event) {
-    flip();
-    return;
-  }
-  const press = event.nativeEvent || event;
-  if (typeof press !== 'object' && typeof press !== 'function') {
-    flip();
-    return;
-  }
-  if (claimedPresses.has(press)) return;
-  claimedPresses.add(press);
-  flip();
-}
 
 /** True once the missing-prop case has been logged, so it is reported only once. */
 let missingPropReported = false;
@@ -223,26 +190,12 @@ function SessionPill(props) {
    * React handler uses, so the two entry points cannot toggle one press twice.
    */
   React.useEffect(() => {
-    const pageWindow = platform.view();
-    if (!pageWindow || typeof pageWindow.addEventListener !== 'function') return undefined;
     const isInsidePill = (target) =>
       Boolean(buttonRef.current && target && buttonRef.current.contains(target));
-    const onCapture = (event) => {
-      if (!isInsidePill(event.target)) return;
-      if (event.type === 'click') {
-        event.stopPropagation();
-        return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-      toggleOnce(event, () => setOpen(!openRef.current));
-    };
-    pageWindow.addEventListener('pointerdown', onCapture, true);
-    pageWindow.addEventListener('click', onCapture, true);
-    return () => {
-      pageWindow.removeEventListener('pointerdown', onCapture, true);
-      pageWindow.removeEventListener('click', onCapture, true);
-    };
+    return attachPressGuard(platform.view(), {
+      isInside: isInsidePill,
+      toggle: () => setOpen(!openRef.current),
+    });
   }, [setOpen]);
 
   /** On open, move focus onto the first row so the list also works from the keyboard. */
@@ -354,7 +307,9 @@ function SessionPill(props) {
     onKeyDown: (event) => {
       if (event.key !== 'Enter' && event.key !== ' ') return;
       event.preventDefault();
-      setOpen(!openRef.current);
+      // Through the same guard as a press: the browser then emits a click for
+      // this key press, and that echo must not toggle a second time.
+      toggleOnce(event, () => setOpen(!openRef.current));
     },
   });
   if (!open) return pill;
@@ -1364,6 +1319,102 @@ function storage() {
 module.exports = { platform, configure, react, element, fragment, portal, view, doc, storage };
     });
 
+    define("press", function (module, exports, require) {
+/**
+ * Press handling for the pill.
+ *
+ * One press must toggle the menu exactly once, and a click that no press
+ * preceded must still toggle. Two handlers can observe one press: the
+ * conversation header is a window-drag surface that consumes pointer events
+ * before they bubble, so the pill installs a capture listener on the page
+ * window; the button also has its own handler, which is the only path when no
+ * drag surface installed one. Both go through `toggleOnce`, so the same press
+ * cannot open the menu and immediately close it again.
+ *
+ * The claim is tracked in a `WeakSet` keyed on the *native* event rather than by
+ * writing a property onto it. Two reasons: a capture listener sees the DOM event
+ * while a React handler is given a `SyntheticEvent` wrapper, so both paths have to
+ * agree on one key; and a host event object is not guaranteed extensible, where a
+ * write would fail silently and quietly disable the guard.
+ *
+ * Click is the awkward one. A pointer press or a key press is handled directly,
+ * and the browser then emits a click for that same gesture — swallowing it is what
+ * stops one press counting twice. But assistive technology and `button.click()`
+ * produce a click with no press at all, and swallowing those would leave the pill
+ * unusable from a screen reader. So a click is swallowed only when it arrives
+ * right after a press this module handled, and is otherwise treated as the
+ * activation it is.
+ */
+
+/** A click this soon after an activation is that activation's echo, not a new one. */
+const ECHO_MS = 800
+
+const claimedPresses = new WeakSet()
+
+/** When the last press was claimed, for echo detection. */
+let lastPressAt = 0
+
+/** The DOM event behind a React synthetic event, or the event itself. */
+function nativeOf(event) {
+  return event ? event.nativeEvent || event : undefined
+}
+
+/** Toggle once per press; the same press seen again by another handler is ignored. */
+function toggleOnce(event, flip) {
+  const press = nativeOf(event)
+  // No event means nothing to correlate, so the call is honoured as-is.
+  if (!press || (typeof press !== 'object' && typeof press !== 'function')) {
+    flip()
+    return
+  }
+  if (claimedPresses.has(press)) return
+  claimedPresses.add(press)
+  lastPressAt = Date.now()
+  flip()
+}
+
+/**
+ * Install the capture listeners and return the detach function.
+ *
+ * @param pageWindow - the page window; anything with add/removeEventListener works
+ * @param options - `{ isInside(target), toggle() }`
+ */
+function attachPressGuard(pageWindow, options) {
+  const noop = () => {}
+  if (!pageWindow || typeof pageWindow.addEventListener !== 'function') return noop
+  const isInside = options.isInside
+  const toggle = options.toggle
+
+  const onCapture = (event) => {
+    if (!isInside(event ? event.target : null)) return
+    if (event.type === 'click') {
+      event.stopPropagation()
+      if (Date.now() - lastPressAt < ECHO_MS) return
+      toggleOnce(event, toggle)
+      return
+    }
+    // Without this the drag surface would start moving the window on the press.
+    event.preventDefault()
+    event.stopPropagation()
+    toggleOnce(event, toggle)
+  }
+
+  pageWindow.addEventListener('pointerdown', onCapture, true)
+  pageWindow.addEventListener('click', onCapture, true)
+  return () => {
+    pageWindow.removeEventListener('pointerdown', onCapture, true)
+    pageWindow.removeEventListener('click', onCapture, true)
+  }
+}
+
+/** Test seam: drop the echo clock so one case cannot swallow the next one's click. */
+function resetPressState() {
+  lastPressAt = 0
+}
+
+module.exports = { attachPressGuard, toggleOnce, resetPressState, ECHO_MS }
+    });
+
     define("roster", function (module, exports, require) {
 /**
  * Roster classification: which sessions are main agents, which are subagents,
@@ -1438,10 +1489,15 @@ function classifySessions(sessions) {
     if (!known(childId) || childId === parentId) return;
     subagents.add(childId);
     if (!known(parentId)) return;
-    if (!result.parentOf.has(childId)) result.parentOf.set(childId, parentId);
+    // One owner per child. Rows are scanned before projections, so the durable
+    // parentId wins; a catalog that names the same child must not add a second
+    // edge, or the child would be nested twice and its activity would count for
+    // two different sessions.
+    if (result.parentOf.has(childId)) return;
+    result.parentOf.set(childId, parentId);
     const siblings = result.childrenOf.get(parentId);
     if (!siblings) result.childrenOf.set(parentId, [childId]);
-    else if (siblings.indexOf(childId) === -1) siblings.push(childId);
+    else siblings.push(childId);
   };
 
   // `byId` carries retained subagent fallbacks that `ids` does not, so scan the
@@ -1495,7 +1551,9 @@ function classifySessions(sessions) {
  * `own` is a session's own turn; `active` folds subagent activity upward while
  * `subagentActivity` is on, so a session whose own turn reads idle but whose
  * subagents are working still counts as running — the "main agent quiet,
- * subagent busy" case.
+ * subagent busy" case. `busy` is the same fold without that setting: it answers
+ * "is there work anywhere in this subtree", which is what the outline needs no
+ * matter how the running count is configured.
  *
  * @param index - from `classifySessions`
  * @param status - `Map<id, SessionStatus>`
@@ -1532,9 +1590,32 @@ function resolveActivity(index, status, config) {
     return value;
   };
 
+  // A separate pass that ignores `subagentActivity`: whether a subtree has work in
+  // it at all is a question about the outline, not about what counts as a running
+  // session. Folding it into `active` made the "subagent activity does not count"
+  // switch also delete rows, which is a different decision.
+  const busy = new Map();
+  const computeBusy = (id, seen) => {
+    if (busy.has(id)) return busy.get(id);
+    if (seen.has(id)) return ownRunning(id);
+    seen.add(id);
+    let value = ownRunning(id);
+    if (!value) {
+      for (const child of index.childrenOf.get(id) || []) {
+        if (computeBusy(child, seen)) {
+          value = true;
+          break;
+        }
+      }
+    }
+    busy.set(id, value);
+    return value;
+  };
+
   return {
     own: ownRunning,
     active: (id) => compute(id, new Set()),
+    busy: (id) => computeBusy(id, new Set()),
   };
 }
 
@@ -1620,19 +1701,25 @@ function workspaceOwners(workspaces, config) {
  * subagent appears one indent further in, directly under the row it belongs to,
  * so the menu reads as an outline instead of two unrelated lists.
  *
- * A child is listed when it is active — its own turn is running, or (with
- * subagent activity folded upward) a descendant of it is. The second case matters
- * for the outline: an intermediate subagent whose own turn went quiet but whose
- * child is still working has to stay on screen, or its child would be indented
- * under nothing.
+ * A child is listed when there is work anywhere in its subtree — its own turn is
+ * running, or something below it is. The second case matters for the outline: an
+ * intermediate subagent whose own turn went quiet but whose child is still working
+ * has to stay on screen, or its child would be indented under nothing. That is
+ * deliberately independent of the `subagentActivity` switch: the switch decides
+ * what counts as a running session, not which rows exist.
  */
 function runningChildren(index, activity, hidden, titleOf, pendingOf, parentId) {
   const rows = [];
+  // One row per session, and no unbounded descent: `childrenOf` is a forest by
+  // construction, but a malformed snapshot could still hand back a cycle, and a
+  // stack overflow here would take the whole header down with it.
+  const seen = new Set([parentId]);
   const walk = (ownerId, depth) => {
     const kids = (index.childrenOf.get(ownerId) || [])
-      .filter((id) => index.byId[id] && !hidden(id) && activity.active(id))
+      .filter((id) => !seen.has(id) && index.byId[id] && !hidden(id) && activity.busy(id))
       .sort((left, right) => contract.updatedAtOf(index.byId[right]) - contract.updatedAtOf(index.byId[left]));
     for (const id of kids) {
+      seen.add(id);
       rows.push({
         id,
         title: titleOf(id),

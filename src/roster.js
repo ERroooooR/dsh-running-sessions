@@ -71,10 +71,15 @@ function classifySessions(sessions) {
     if (!known(childId) || childId === parentId) return;
     subagents.add(childId);
     if (!known(parentId)) return;
-    if (!result.parentOf.has(childId)) result.parentOf.set(childId, parentId);
+    // One owner per child. Rows are scanned before projections, so the durable
+    // parentId wins; a catalog that names the same child must not add a second
+    // edge, or the child would be nested twice and its activity would count for
+    // two different sessions.
+    if (result.parentOf.has(childId)) return;
+    result.parentOf.set(childId, parentId);
     const siblings = result.childrenOf.get(parentId);
     if (!siblings) result.childrenOf.set(parentId, [childId]);
-    else if (siblings.indexOf(childId) === -1) siblings.push(childId);
+    else siblings.push(childId);
   };
 
   // `byId` carries retained subagent fallbacks that `ids` does not, so scan the
@@ -128,7 +133,9 @@ function classifySessions(sessions) {
  * `own` is a session's own turn; `active` folds subagent activity upward while
  * `subagentActivity` is on, so a session whose own turn reads idle but whose
  * subagents are working still counts as running — the "main agent quiet,
- * subagent busy" case.
+ * subagent busy" case. `busy` is the same fold without that setting: it answers
+ * "is there work anywhere in this subtree", which is what the outline needs no
+ * matter how the running count is configured.
  *
  * @param index - from `classifySessions`
  * @param status - `Map<id, SessionStatus>`
@@ -165,9 +172,32 @@ function resolveActivity(index, status, config) {
     return value;
   };
 
+  // A separate pass that ignores `subagentActivity`: whether a subtree has work in
+  // it at all is a question about the outline, not about what counts as a running
+  // session. Folding it into `active` made the "subagent activity does not count"
+  // switch also delete rows, which is a different decision.
+  const busy = new Map();
+  const computeBusy = (id, seen) => {
+    if (busy.has(id)) return busy.get(id);
+    if (seen.has(id)) return ownRunning(id);
+    seen.add(id);
+    let value = ownRunning(id);
+    if (!value) {
+      for (const child of index.childrenOf.get(id) || []) {
+        if (computeBusy(child, seen)) {
+          value = true;
+          break;
+        }
+      }
+    }
+    busy.set(id, value);
+    return value;
+  };
+
   return {
     own: ownRunning,
     active: (id) => compute(id, new Set()),
+    busy: (id) => computeBusy(id, new Set()),
   };
 }
 

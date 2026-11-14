@@ -71,7 +71,12 @@ plugin_manager remove_bundle(target="dsh-running-sessions")   # 桌面应用内
 dsh plugin --profile web remove dsh-running-sessions           # dsh web
 ```
 
-> 早期版本（1.3.x 及以前）的包名是私有的 `@local/running-sessions`，如果你装过那一版，先按上面的卸载命令再装新的。
+> 更名前的本地开发版用的是私有包名 `@local/running-sessions`，它从未发布到 npm。如果你装过那种版本，卸载要用**旧名字**，否则旧依赖会和新条目同时留在 profile 里：
+>
+> ```powershell
+> plugin_manager remove_bundle(target="@local/running-sessions")   # 桌面应用内
+> dsh plugin --profile web remove @local/running-sessions           # dsh web
+> ```
 
 ## 使用
 
@@ -80,7 +85,7 @@ dsh plugin --profile web remove dsh-running-sessions           # dsh web
 | 切到某个运行中的会话 | 点胶囊 → 点那一行 |
 | 切到刚结束的会话 | 点胶囊 → 「最近完成」里点一行 |
 | 关掉下拉 | 再点胶囊 / `Esc` / 点空白处 |
-| 键盘操作 | 打开后首行自动聚焦，`Tab` 或方向键移动，回车切换 |
+| 键盘操作 | 打开后首行自动聚焦，`Tab` 逐行移动，回车切换 |
 | 改设置 | 下拉右上角齿轮 |
 
 胶囊上的绿点会轻微呼吸，扫一眼就知道有没有会话在跑；数字跟着会话状态实时变化。
