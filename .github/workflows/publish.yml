@@ -10,7 +10,7 @@ on:
 
 permissions:
   contents: write # create the GitHub Release
-  id-token: write # npm provenance attestation
+  id-token: write # npm trusted publishing + provenance
 
 jobs:
   publish:
@@ -21,7 +21,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
+          # No registry-url: it writes an .npmrc with an empty _authToken, which
+          # makes npm look for a token instead of doing the OIDC exchange.
+
+      # Trusted publishing needs npm 11.5.1+; the CLI bundled with Node 22 is
+      # older than that and would fall back to looking for a token.
+      - name: Upgrade npm for trusted publishing
+        run: npm install --global npm@latest
 
       - name: Check the tag matches package.json
         if: github.event_name == 'push'
@@ -52,11 +58,15 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # No NODE_AUTH_TOKEN on purpose: a granular token makes npm stage the
+      # release behind a manual 2FA approval, which is what left 0.0.0-stage on
+      # the registry instead of this version. Trusted publishing (the token the
+      # OIDC exchange returns) publishes directly. Configure it once at
+      # npmjs.com → package → Settings → Trusted publishing, with repository
+      # ERroooooR/dsh-running-sessions and workflow filename publish.yml.
       - name: Publish to npm
         if: steps.probe.outputs.skip != 'true'
         run: npm publish --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       # A version-free asset name keeps
       # https://github.com/.../releases/latest/download/dsh-running-sessions.tgz
@@ -69,12 +79,16 @@ jobs:
           npm pack --pack-destination release
           mv release/*.tgz release/dsh-running-sessions.tgz
 
-      - name: Create the GitHub Release
+      - name: Create or refresh the GitHub Release
         if: github.event_name == 'push' && steps.probe.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --title "$GITHUB_REF_NAME" \
-            --generate-notes \
-            release/dsh-running-sessions.tgz
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release/dsh-running-sessions.tgz --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "$GITHUB_REF_NAME" \
+              --generate-notes \
+              release/dsh-running-sessions.tgz
+          fi
