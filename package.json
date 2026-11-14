@@ -1,6 +1,6 @@
 {
   "name": "dsh-running-sessions",
-  "version": "1.3.2",
+  "version": "1.3.3",
   "type": "module",
   "description": "DeepSeek Harness client plugin: a title-bar pill that lists running and recently finished sessions for one-click switching, and nests each sub-agent under the session that owns it.",
   "license": "MIT",
