@@ -2,17 +2,18 @@
 
 <div align="center">
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/ERroooooR/dsh-running-sessions/blob/main/LICENSE)
+[![npm](https://img.shields.io/npm/v/dsh-running-sessions.svg)](https://www.npmjs.com/package/dsh-running-sessions)
 [![DSH](https://img.shields.io/badge/DSH-0.2.2--rc.3%2B-4d6bfe)](https://github.com/deepseek-ai/deepseek-harness)
 [![platform](https://img.shields.io/badge/platform-DSH%20Web%20%2F%20Desktop-8A2BE2)](#安装)
 [![GitHub stars](https://img.shields.io/github/stars/ERroooooR/dsh-running-sessions?style=social)](https://github.com/ERroooooR/dsh-running-sessions/stargazers)
 
 <p>
-  <img src="./preview.png" alt="真实窗口里的位置：胶囊在会话标题栏左侧，展开是运行中会话清单" width="660" />
+  <img src="https://raw.githubusercontent.com/ERroooooR/dsh-running-sessions/main/preview.png" alt="真实窗口里的位置：胶囊在会话标题栏左侧，展开是运行中会话清单" width="660" />
 </p>
 <p>
-  <img src="./preview-menu.png" alt="运行中会话：每个主会话下面缩进列出它自己的子 agent，子 agent 行只有一行标题、同一颗绿点" width="248" />
-  <img src="./preview-settings.png" alt="设置面板：七项开关，改完立刻生效，不必重载应用" width="245" />
+  <img src="https://raw.githubusercontent.com/ERroooooR/dsh-running-sessions/main/preview-menu.png" alt="运行中会话：每个主会话下面缩进列出它自己的子 agent，子 agent 行只有一行标题、同一颗绿点" width="248" />
+  <img src="https://raw.githubusercontent.com/ERroooooR/dsh-running-sessions/main/preview-settings.png" alt="设置面板：七项开关，改完立刻生效，不必重载应用" width="245" />
 </p>
 
 </div>
@@ -37,28 +38,40 @@ DeepSeek Harness 的界面插件：在会话标题栏左侧放一枚常驻胶囊
 
 ## 安装
 
+已发布到 npm，用包名装最省事（预构建产物，安装时不需要跑构建脚本）：
+
+```sh
+dsh plugin add dsh-running-sessions
+```
+
 **桌面应用（Electron 版）** —— 桌面端的 profile 由应用托管，CLI 的 `--profile desktop` 会被拒绝，所以在应用里让 DSH 自己装：
+
+```powershell
+plugin_manager install_bundle(target="dsh-running-sessions")
+```
+
+**想跟开发版** —— 直接指到仓库目录（走 symlink，改完重载即生效）：
 
 ```powershell
 plugin_manager install_bundle(target="<本仓库的绝对路径>")
 ```
 
-**dsh web** —— 直接从 GitHub 装（需要已安装 `pnpm`）：
+**dsh web** —— 从 GitHub 装（需要已安装 `pnpm`）：
 
 ```sh
 dsh plugin --profile web add github:ERroooooR/dsh-running-sessions
 ```
 
-装完按 `Ctrl+R`（web 端硬刷新 `Ctrl+Shift+R`）重载界面即可看到胶囊。install 走的是 symlink，所以以后改 `client.js` 也是重载一下就行，不用重装。
+装完按 `Ctrl+R`（web 端硬刷新 `Ctrl+Shift+R`）重载界面即可看到胶囊。
 
 卸载：
 
 ```powershell
-plugin_manager remove_bundle(target="@local/running-sessions")   # 桌面应用内
-dsh plugin --profile web remove @local/running-sessions           # dsh web
+plugin_manager remove_bundle(target="dsh-running-sessions")   # 桌面应用内
+dsh plugin --profile web remove dsh-running-sessions           # dsh web
 ```
 
-> 没有发布到 npm —— 包名是私有的 `@local/running-sessions`，安装请走上面的本地目录 / `github:` 两种方式。
+> 早期版本（1.3.x 及以前）的包名是私有的 `@local/running-sessions`，如果你装过那一版，先按上面的卸载命令再装新的。
 
 ## 使用
 

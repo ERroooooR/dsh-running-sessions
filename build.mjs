@@ -30,7 +30,7 @@ const OUT_FILE = path.join(root, 'client.js')
 /** Modules the browser kernel provides; a bare require must name one of them. */
 const PLATFORM_MODULES = new Set(['react', 'react-dom'])
 
-const PACKAGE_ID = '@local/running-sessions'
+const PACKAGE_ID = 'dsh-running-sessions'
 const ENTRY = 'main'
 
 /** Code-unit order: deterministic on every machine, unlike a locale-aware sort. */

@@ -391,7 +391,7 @@ await check.async('the generated bundle contains every source module', async () 
   assert.equal(count, files.length, 'bundle module count matches the source tree')
   const shipped = await readFile(path.join(root, 'client.js'), 'utf8')
   assert.match(shipped, /window\.__ModuleLoader__\.load\(\{/)
-  assert.match(shipped, /id: "@local\/running-sessions"/)
+  assert.match(shipped, /id: "dsh-running-sessions"/)
 })
 
 check.summary()

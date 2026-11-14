@@ -1,0 +1,80 @@
+name: Publish
+
+# Tagging is the release action: `git tag v1.3.1 && git push origin v1.3.1`.
+# Nothing is published from a branch push, and a tag that disagrees with
+# package.json fails before the registry is touched.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write # create the GitHub Release
+  id-token: write # npm provenance attestation
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Check the tag matches package.json
+        if: github.event_name == 'push'
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$version" != "$tag" ]; then
+            echo "::error::tag v$tag does not match package.json version $version — bump the version, or retag."
+            exit 1
+          fi
+
+      # The registry should never receive an artifact the suite did not pass.
+      - name: Test
+        run: npm test
+
+      - name: Verify the published tarball contents
+        run: npm run check:pack
+
+      - name: Is this version already on npm?
+        id: probe
+        run: |
+          name="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
+          if npm view "$name@$version" version >/dev/null 2>&1; then
+            echo "::notice::$name@$version is already published; skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish to npm
+        if: steps.probe.outputs.skip != 'true'
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # A version-free asset name keeps
+      # https://github.com/.../releases/latest/download/dsh-running-sessions.tgz
+      # working across releases; a versioned name would 404 the day the next
+      # release is cut.
+      - name: Pack a tarball for the GitHub Release
+        if: steps.probe.outputs.skip != 'true'
+        run: |
+          mkdir -p release
+          npm pack --pack-destination release
+          mv release/*.tgz release/dsh-running-sessions.tgz
+
+      - name: Create the GitHub Release
+        if: github.event_name == 'push' && steps.probe.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            release/dsh-running-sessions.tgz

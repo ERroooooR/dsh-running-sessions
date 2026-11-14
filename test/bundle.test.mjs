@@ -120,7 +120,7 @@ function standardTable() {
 
 await check.async('the bundle registers under the package id with one factory', async () => {
   const { entry } = await runBundle(standardTable())
-  assert.equal(entry.id, '@local/running-sessions')
+  assert.equal(entry.id, 'dsh-running-sessions')
   assert.equal(typeof entry.factory, 'function')
 })
 

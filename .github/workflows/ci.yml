@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test · node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # No third-party dependencies, so there is nothing to install: the suite
+        # runs on the checkout alone. 20 is the floor declared in engines.
+        node: ['20', '22', '24']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      # pretest rebuilds client.js in memory and fails when the committed
+      # artifact drifted from src/ — that check is the point of running this in CI.
+      - name: Test
+        run: npm test
+      - name: Verify the published tarball contents
+        run: npm run check:pack

@@ -1,9 +1,9 @@
 /**
- * @local/running-sessions — GENERATED BUNDLE. Source lives in src/; edit there and run
+ * dsh-running-sessions — GENERATED BUNDLE. Source lives in src/; edit there and run
  * `npm run build`. `npm test` refuses to run against a stale bundle.
  */
 window.__ModuleLoader__.load({
-  id: "@local/running-sessions",
+  id: "dsh-running-sessions",
   factory(require) {
     // Package-local registry. Kept inside the factory on purpose: the kernel
     // calls it once per activation and nothing leaks into the page.
