@@ -25,9 +25,11 @@ jobs:
           # makes npm look for a token instead of doing the OIDC exchange.
 
       # Trusted publishing needs npm 11.5.1+; the CLI bundled with Node 22 is
-      # older than that and would fall back to looking for a token.
+      # older than that and would fall back to looking for a token. Pinned to the
+      # major rather than `@latest` so a release does not change npm out from under
+      # itself — npm 12 already reshaped `pack --json`, which `check:pack` handles.
       - name: Upgrade npm for trusted publishing
-        run: npm install --global npm@latest
+        run: npm install --global npm@11
 
       - name: Check the tag matches package.json
         if: github.event_name == 'push'
