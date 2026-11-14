@@ -48,6 +48,19 @@ jobs:
       - name: Verify the published tarball contents
         run: npm run check:pack
 
+      # Distinguishes the two ways trusted publishing can fail: no OIDC token in
+      # this job at all, versus a token the registry has no trusted relationship
+      # for (which surfaces as ENEEDAUTH from `npm publish`).
+      - name: Report the publishing identity
+        run: |
+          echo "npm $(npm --version), node $(node --version)"
+          if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "OIDC request URL: available"
+          else
+            echo "::error::OIDC request URL is missing — id-token: write did not reach this job"
+            exit 1
+          fi
+
       - name: Is this version already on npm?
         id: probe
         run: |
