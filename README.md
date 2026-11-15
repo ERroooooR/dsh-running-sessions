@@ -3,7 +3,6 @@
 <div align="center">
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/ERroooooR/dsh-running-sessions/blob/main/LICENSE)
-[![npm](https://img.shields.io/npm/v/dsh-running-sessions.svg)](https://www.npmjs.com/package/dsh-running-sessions)
 [![DSH](https://img.shields.io/badge/DSH-0.2.2--rc.3%2B-4d6bfe)](https://github.com/deepseek-ai/deepseek-harness)
 [![platform](https://img.shields.io/badge/platform-DSH%20Web%20%2F%20Desktop-8A2BE2)](#安装)
 [![GitHub stars](https://img.shields.io/github/stars/ERroooooR/dsh-running-sessions?style=social)](https://github.com/ERroooooR/dsh-running-sessions/stargazers)
@@ -38,29 +37,21 @@ DeepSeek Harness 的界面插件：在会话标题栏左侧放一枚常驻胶囊
 
 ## 安装
 
-已发布到 npm，用包名装最省事（预构建产物，安装时不需要跑构建脚本）：
+**从 GitHub 装** —— 这是现在就能用的方式。产物 `client.js` 已经预构建好，安装时不需要跑构建脚本：
 
 ```sh
-dsh plugin add dsh-running-sessions
+dsh plugin --profile web add github:ERroooooR/dsh-running-sessions
 ```
 
-**桌面应用（Electron 版）** —— 桌面端的 profile 由应用托管，CLI 的 `--profile desktop` 会被拒绝，所以在应用里让 DSH 自己装：
-
-```powershell
-plugin_manager install_bundle(target="dsh-running-sessions")
-```
-
-**想跟开发版** —— 直接指到仓库目录（走 symlink，改完重载即生效）：
+**桌面应用（Electron 版）** —— 桌面端的 profile 由应用托管，CLI 的 `--profile desktop` 会被拒绝，所以在应用里让 DSH 自己装。`install_bundle` 接受本地目录、git URL、tarball URL 或 npm 包名：
 
 ```powershell
 plugin_manager install_bundle(target="<本仓库的绝对路径>")
 ```
 
-**dsh web** —— 从 GitHub 装（需要已安装 `pnpm`）：
+`install_bundle` 走的是链接安装，所以以后改 `client.js` 也是重载一下就行，不用重装。
 
-```sh
-dsh plugin --profile web add github:ERroooooR/dsh-running-sessions
-```
+> npm 包名 `dsh-running-sessions` 已经预留，但**还没有发布**（首次发布走 GitHub Actions 的 Trusted Publishing，见 [RELEASING.md](RELEASING.md)）。发布之后可以改成一条命令：`dsh plugin add dsh-running-sessions`。
 
 装完按 `Ctrl+R`（web 端硬刷新 `Ctrl+Shift+R`）重载界面即可看到胶囊。
 
@@ -156,7 +147,7 @@ DSH 让每个子 agent 跑在自己的 Session 里，`session.list` 把它们和
 
 ## 开发
 
-源码在 `src/`，按职责拆成 21 个普通 CommonJS 模块；`client.js` 是**生成的**单文件产物（`window.__ModuleLoader__.load` 只能收一个 classic script，所以产物必须是一个文件）。
+源码在 `src/`，按职责拆成 22 个普通 CommonJS 模块；`client.js` 是**生成的**单文件产物（`window.__ModuleLoader__.load` 只能收一个 classic script，所以产物必须是一个文件）。
 
 | 文件 | 作用 |
 | --- | --- |
@@ -168,13 +159,16 @@ DSH 让每个子 agent 跑在自己的 Session 里，`session.list` 把它们和
 | `src/roster.js` | 血缘分类与活动解析（谁是主会话、谁折进谁、谁在跑） |
 | `src/rows.js` | 胶囊的两个计数 + 下拉行数据（每个运行中主会话带自己的嵌套子 agent 行） |
 | `src/config.js`、`src/hint.js` | 选项持久化与一次性提示标志 |
+| `src/press.js` | 按压守卫：一次按压只切一次，且没有按前事件的 `click`（无障碍、脚本触发）仍然生效 |
 | `src/view/*.js` | 纯渲染：胶囊、菜单、行、设置面板、图标 |
 | `src/style.js` | 样式表与一次性注入 |
 | `src/geometry.js`、`src/time.js`、`src/mount-state.js`、`src/nav.js`、`src/i18n.js`、`src/dictionaries.js` | 定位、相对时间、跨挂载状态、导航、翻译、文案 |
 | `index.js` | Host 侧空实现（纯 UI 插件） |
 | `cordis.patch.yml` | bundle patch，`insert` 一行插件记录 |
 | `locale/zh.json`、`locale/en.json` | 插件市场里的名称与描述 |
-| `icon.svg` | 插件图标 |
+| `icon.svg` | 插件详情页图标（DSH 插件页用，`exports["./icon"]`） |
+| `assets/icon.png` | 插件市场卡片图标（列表的 `icon:` 只收 GitHub 托管的位图，不收 SVG） |
+| `screenshots.json` | 市场详情页的截图顺序（1–8 张，路径相对本文件） |
 | `test/` | 无头断言（见下） |
 
 改完源码跑 `npm run build` 重新生成 `client.js`，再重载界面。三个容易踩回来的坑：
@@ -183,7 +177,7 @@ DSH 让每个子 agent 跑在自己的 Session 里，`session.list` 把它们和
 2. **切换会话会重建 header 组件**：展开状态放进组件会随重挂载丢失，现在放模块级（`mount-state.js`），且只允许 3 秒内跨挂载恢复，避免以后自弹。
 3. **主题没有圆角变量**：`--dsw-alias-*` 全是颜色，圆角必须写字面量；官方同排 chip 实测是 26px 高 / 8px 圆角 / 0.5px 描边 / 透明填充。
 
-两条结构性约束由测试守住，不是靠自觉：
+三条结构性约束由测试守住，不是靠自觉：
 
 - **只有 `contract.js` 能出现 DSH 的字段名/服务名**，别的模块出现就报错 —— 这样"升级会坏在哪"永远是一个文件的事。
 - **只有 `platform.js` 能 `require('react')` / `require('react-dom')`**，别的模块出现就报错。
@@ -200,11 +194,12 @@ DSH 让每个子 agent 跑在自己的 Session 里，`session.list` 把它们和
 ```sh
 node build.mjs --check          # 产物是否与源码同步（npm test 的 pretest）
 node test/contract.test.mjs     # 14 项：DSH 字段契约、缺字段降级、catalog 名字、定位与相对时间
-node test/roster.test.mjs       # 28 项：血缘判定、嵌套层级、子 agent 命名、折叠、归档、环、配置归一
-node test/render.test.mjs       # 27 项：胶囊文字、子 agent 嵌套与命名、设置面板、一次性提示、图标墨量、单击只切一次
-node test/integration.test.mjs  # 17 项：词典键集、apply() 注册、分层规则、样式热重载、死代码、产物同步
+node test/roster.test.mjs       # 31 项：血缘判定、嵌套层级、子 agent 命名、折叠、归档、环、归属冲突、配置归一
+node test/press.test.mjs        # 10 项：一次按压只切一次、无障碍 click、回声窗口、监听器摘除
+node test/render.test.mjs       # 27 项：胶囊文字、子 agent 嵌套与命名、设置面板、一次性提示、图标墨量
+node test/integration.test.mjs  # 18 项：词典键集、apply() 注册、分层规则、样式热重载、死代码、产物同步、按压守卫接线
 node test/bundle.test.mjs       #  6 项：产物在沙箱里的注册与降级
-npm test                        # 上面五个 + pretest 一起跑
+npm test                        # 上面六个 + pretest 一起跑
 ```
 
 ## 许可证
