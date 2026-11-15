@@ -73,15 +73,77 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # No NODE_AUTH_TOKEN on purpose: a granular token makes npm stage the
-      # release behind a manual 2FA approval, which is what left 0.0.0-stage on
-      # the registry instead of this version. Trusted publishing (the token the
-      # OIDC exchange returns) publishes directly. Configure it once at
-      # npmjs.com → package → Settings → Trusted publishing, with repository
-      # ERroooooR/dsh-running-sessions and workflow filename publish.yml.
+      # No NODE_AUTH_TOKEN on purpose: trusted publishing does the OIDC exchange,
+      # so the job publishes as this repository rather than as a long-lived secret.
+      # Configure it at npmjs.com → package → Settings → Trusted publishing, with
+      # repository ERroooooR/dsh-running-sessions and workflow filename publish.yml.
+      #
+      # A trusted publisher created after 2026-09-03 allows only `npm stage
+      # publish` until the maintainer ticks "npm publish" on that entry. Both are
+      # handled here: publish directly when allowed, otherwise stage the version so
+      # a maintainer can approve it with one 2FA click. Staging is not a failure —
+      # the artifact is built and signed either way.
       - name: Publish to npm
+        id: publish
         if: steps.probe.outputs.skip != 'true'
-        run: npm publish --access public --provenance
+        run: |
+          set +e
+          direct="$(npm publish --access public --provenance 2>&1)"
+          status=$?
+          set -e
+          printf '%s\n' "$direct"
+
+          if [ "$status" -eq 0 ]; then
+            echo "mode=published" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Only this exact refusal means "the trusted publisher is stage-only".
+          # Anything else is a real error and must not be papered over.
+          if ! printf '%s' "$direct" | grep -q 'OIDC permission denied for this action'; then
+            exit "$status"
+          fi
+
+          echo "::notice::This trusted publisher allows staged publishing only; staging $version for approval."
+          staged="$(npm stage publish --access public --provenance 2>&1)" || {
+            # Re-running a tag must not fail merely because the version is already
+            # sitting in the staging area.
+            if printf '%s' "$staged" | grep -qi 'already'; then
+              printf '%s\n' "$staged"
+              echo "mode=staged" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            printf '%s\n' "$staged" >&2
+            exit 1
+          }
+          printf '%s\n' "$staged"
+          echo "mode=staged" >> "$GITHUB_OUTPUT"
+
+      - name: Explain what happened
+        if: steps.publish.outputs.mode != ''
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          {
+            echo "### npm publish: ${{ steps.publish.outputs.mode }}"
+            echo
+            if [ "${{ steps.publish.outputs.mode }}" = "published" ]; then
+              echo "\`dsh-running-sessions@$version\` is live on npm."
+            else
+              echo "\`dsh-running-sessions@$version\` is **staged**, not live yet."
+              echo
+              echo "Approve it with one 2FA click: https://www.npmjs.com/package/dsh-running-sessions?activeTab=versions"
+              echo
+              echo "Or from a machine that is logged in and has npm >= 11.15 — the id comes from \`npm stage list\`:"
+              echo
+              echo '```sh'
+              echo "npm stage list dsh-running-sessions   # prints the staged version and its stage id"
+              echo "npm stage approve <stage-id>"
+              echo '```'
+              echo
+              echo "To make future releases publish directly, tick **npm publish** under"
+              echo "Settings → Trusted publishing → Allowed actions."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # A version-free asset name keeps
       # https://github.com/.../releases/latest/download/dsh-running-sessions.tgz
