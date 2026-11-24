@@ -48,8 +48,11 @@ jobs:
       - name: Verify the published tarball contents
         run: npm run check:pack
 
+      # Diagnostics only. Which credential npm uses is not ours to pick: when the
+      # package has a trusted publisher configured, npm authenticates with OIDC
+      # and ignores an .npmrc token, even one `npm whoami` accepts. This reports
+      # what is available so a failure is readable, and never branches on it.
       - name: Report the available credentials
-        id: auth
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
@@ -60,24 +63,20 @@ jobs:
             echo "OIDC request URL: missing"
           fi
           if [ -n "${NPM_TOKEN:-}" ]; then
-            # npm reads NODE_AUTH_TOKEN only through an .npmrc, so write one.
+            # npm reads a token only through an .npmrc, so write one to look it up.
             printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" > "$HOME/.npmrc"
             set +e
             who="$(npm whoami 2>&1)"
             status=$?
             set -e
             if [ "$status" -eq 0 ]; then
-              echo "NPM_TOKEN: authenticated as $who"
-              echo "token=usable" >> "$GITHUB_OUTPUT"
+              echo "NPM_TOKEN: accepted by the registry as $who"
+              echo "Note: a configured trusted publisher still takes precedence over this token."
             else
-              echo "::warning::NPM_TOKEN is present but rejected; falling back to OIDC."
-              echo "$who"
-              rm -f "$HOME/.npmrc"
-              echo "token=rejected" >> "$GITHUB_OUTPUT"
+              echo "::warning::NPM_TOKEN is present but rejected: $who"
             fi
           else
-            echo "NPM_TOKEN: absent; using OIDC only."
-            echo "token=absent" >> "$GITHUB_OUTPUT"
+            echo "NPM_TOKEN: absent; only OIDC is available."
           fi
 
       - name: Is this version already on npm?
@@ -92,18 +91,10 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # Two working auth paths, tried in the order that has actually shipped a
-      # release here:
-      #
-      #   1. NPM_TOKEN  — a granular token with publish rights on this package. This
-      #      is how 1.3.1 reached the registry, provenance included.
-      #   2. OIDC        — no long-lived secret. A trusted publisher created after
-      #      2026-09-03 defaults to `npm stage publish` only, so a direct publish
-      #      can be refused with `OIDC permission denied for this action`; that
-      #      exact refusal means "stage it instead", which still needs one 2FA
-      #      approval by a maintainer.
-      #
-      # Any other error is real and must not be papered over.
+      # A direct publish is attempted once. The only refusal this recovers from is
+      # `OIDC permission denied for this action`, which means the trusted publisher
+      # allows `npm stage publish` but not `npm publish` — a one-click 2FA approval
+      # then makes it live. Any other error fails the release.
       #
       # The logic lives in scripts/publish.sh so test/publish-workflow.test.sh can
       # drive it against a fake npm instead of only in a real release.
@@ -112,9 +103,7 @@ jobs:
         if: steps.probe.outputs.skip != 'true'
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_TOKEN_STATE: ${{ steps.auth.outputs.token }}
         run: bash scripts/publish.sh
-
 
       - name: Explain what happened
         if: steps.publish.outputs.mode != ''
@@ -122,8 +111,6 @@ jobs:
           version="$(node -p "require('./package.json').version")"
           {
             echo "### npm publish: ${{ steps.publish.outputs.mode }}"
-            echo
-            echo "Authenticated with: \`${{ steps.publish.outputs.via }}\`"
             echo
             if [ "${{ steps.publish.outputs.mode }}" = "published" ]; then
               echo "\`dsh-running-sessions@$version\` is live on npm."
