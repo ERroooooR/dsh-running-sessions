@@ -3,7 +3,7 @@
 <div align="center">
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/ERroooooR/dsh-running-sessions/blob/main/LICENSE)
-[![DSH](https://img.shields.io/badge/DSH-0.2.2--rc.3%2B-4d6bfe)](https://github.com/deepseek-ai/deepseek-harness)
+[![DSH](https://img.shields.io/badge/DSH-0.2.2--rc.5%2B-4d6bfe)](https://github.com/deepseek-ai/deepseek-harness)
 [![platform](https://img.shields.io/badge/platform-DSH%20Web%20%2F%20Desktop-8A2BE2)](#安装)
 [![GitHub stars](https://img.shields.io/github/stars/ERroooooR/dsh-running-sessions?style=social)](https://github.com/ERroooooR/dsh-running-sessions/stargazers)
 
@@ -64,7 +64,7 @@ plugin_manager install_bundle(target="<本仓库的绝对路径>")
 
 ## 兼容性
 
-- DSH 0.2.2-rc.3，Web 端与桌面端。
+- DSH 0.2.2-rc.5，Web 端与桌面端。
 - 快照字段缺失时插件退化成不显示胶囊，不影响标题栏其它部分。
 
 ## 已知限制
@@ -78,8 +78,9 @@ plugin_manager install_bundle(target="<本仓库的绝对路径>")
 `src/` 是 22 个 CommonJS 模块，`client.js` 由 `node build.mjs` 打包成单文件后提交。
 
 ```sh
-node build.mjs    # 重新生成 client.js
-npm test          # 106 项
+node build.mjs                      # 重新生成 client.js
+npm test                            # 106 项
+bash test/publish-workflow.test.sh  # 15 项，发布逻辑
 ```
 
 ## 许可证
