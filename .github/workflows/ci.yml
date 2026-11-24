@@ -32,5 +32,7 @@ jobs:
       # artifact drifted from src/ — that check is the point of running this in CI.
       - name: Test
         run: npm test
+      - name: Test the release workflow's publish logic
+        run: bash test/publish-workflow.test.sh
       - name: Verify the published tarball contents
         run: npm run check:pack

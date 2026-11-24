@@ -104,59 +104,17 @@ jobs:
       #      approval by a maintainer.
       #
       # Any other error is real and must not be papered over.
+      #
+      # The logic lives in scripts/publish.sh so test/publish-workflow.test.sh can
+      # drive it against a fake npm instead of only in a real release.
       - name: Publish to npm
         id: publish
         if: steps.probe.outputs.skip != 'true'
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          publish_once() {
-            set +e
-            out="$("$@" 2>&1)"
-            status=$?
-            set -e
-            printf '%s\n' "$out"
-            return $status
-          }
+          NPM_TOKEN_STATE: ${{ steps.auth.outputs.token }}
+        run: bash scripts/publish.sh
 
-          if [ "${{ steps.auth.outputs.token }}" = "usable" ]; then
-            echo "::notice::Publishing with NPM_TOKEN."
-            if publish_once npm publish --access public --provenance; then
-              echo "mode=published" >> "$GITHUB_OUTPUT"
-              echo "via=token" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            echo "::error::npm publish with NPM_TOKEN failed."
-            exit 1
-          fi
-
-          echo "::notice::No usable token; trying OIDC direct publish."
-          if publish_once npm publish --access public --provenance; then
-            echo "mode=published" >> "$GITHUB_OUTPUT"
-            echo "via=oidc" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if ! printf '%s' "$out" | grep -q 'OIDC permission denied for this action'; then
-            echo "::error::OIDC publish failed for a reason other than a stage-only trusted publisher."
-            exit 1
-          fi
-
-          echo "::notice::This trusted publisher allows staged publishing only; staging for approval."
-          if publish_once npm stage publish --access public --provenance; then
-            echo "mode=staged" >> "$GITHUB_OUTPUT"
-            echo "via=oidc" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # Re-running a tag must not fail merely because the version is already
-          # sitting in the staging area.
-          if printf '%s' "$out" | grep -qi 'already'; then
-            echo "mode=staged" >> "$GITHUB_OUTPUT"
-            echo "via=oidc" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "::error::npm stage publish failed."
-          exit 1
 
       - name: Explain what happened
         if: steps.publish.outputs.mode != ''

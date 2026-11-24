@@ -10,3 +10,7 @@ build.mjs text eol=lf
 *.yml text eol=lf
 *.md text eol=lf
 *.svg text eol=lf
+
+# Shell scripts run under bash, where a CRLF line ending is a syntax error. A
+# Windows checkout with core.autocrlf=true would otherwise break them.
+*.sh text eol=lf
