@@ -34,5 +34,7 @@ jobs:
         run: npm test
       - name: Test the release workflow's publish logic
         run: bash test/publish-workflow.test.sh
+      - name: Test the release workflow's GitHub Release logic
+        run: bash test/release-workflow.test.sh
       - name: Verify the published tarball contents
         run: npm run check:pack

@@ -142,16 +142,16 @@ jobs:
           npm pack --pack-destination release
           mv release/*.tgz release/dsh-running-sessions.tgz
 
+      # The Release is part of every run, not just a tag push: a `workflow_dispatch`
+      # run has no tag name of its own, and a re-run must be able to finish a release
+      # whose publish step already succeeded. The tag therefore comes from
+      # package.json — the same value "Check the tag matches package.json" pinned —
+      # rather than from GITHUB_REF_NAME, which is a branch name on a dispatch run and
+      # would otherwise produce a Release called "main".
+      #
+      # The logic lives in scripts/release.sh so test/release-workflow.test.sh can
+      # drive it against a fake gh instead of only in a real release.
       - name: Create or refresh the GitHub Release
-        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" release/dsh-running-sessions.tgz --clobber
-          else
-            gh release create "$GITHUB_REF_NAME" \
-              --title "$GITHUB_REF_NAME" \
-              --generate-notes \
-              release/dsh-running-sessions.tgz
-          fi
+        run: bash scripts/release.sh
