@@ -1,0 +1,85 @@
+name: npm auth check
+
+# Read-only diagnostic. Reports what npm and the registry think of this
+# repository's publishing credentials; creates, stages and publishes nothing.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Use the same npm as the release workflow
+        run: npm install --global npm@11
+
+      - name: Tool and OIDC availability
+        run: |
+          echo "npm $(npm --version), node $(node --version)"
+          if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "OIDC request URL: available"
+          else
+            echo "OIDC request URL: MISSING"
+          fi
+          echo "manifest: $(node -p "require('./package.json').name")@$(node -p "require('./package.json').version")"
+
+      # npm only uses NODE_AUTH_TOKEN when an .npmrc refers to it, so the test
+      # would report a false negative without this file.
+      - name: Does the repository secret still authenticate?
+        id: token
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "${NPM_TOKEN:-}" ]; then
+            echo "NPM_TOKEN: empty or absent"
+            echo "result=absent" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "NPM_TOKEN: present (${#NPM_TOKEN} chars)"
+          printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" > "$HOME/.npmrc"
+          set +e
+          out="$(npm whoami 2>&1)"
+          status=$?
+          set -e
+          echo "npm whoami exit=$status"
+          echo "$out"
+          if [ "$status" -eq 0 ]; then
+            echo "result=ok" >> "$GITHUB_OUTPUT"
+          else
+            echo "result=rejected" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Registry view of the trusted publishers
+        if: steps.token.outputs.result == 'ok'
+        run: |
+          set +e
+          npm trust list dsh-running-sessions --json
+          status=$?
+          set -e
+          echo "npm trust list exit=$status"
+          if [ "$status" -ne 0 ]; then
+            echo "::warning::npm trust list failed with exit $status"
+          fi
+
+      - name: Registry state of this package
+        run: |
+          name="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
+          echo "manifest version: $version"
+          if npm view "$name@$version" version >/dev/null 2>&1; then
+            echo "manifest version: already published"
+          else
+            echo "manifest version: not published"
+          fi
+          echo "published versions: $(npm view "$name" versions --json 2>/dev/null | tr -d '\n ')"
+          echo "dist-tags: $(npm view "$name" dist-tags --json 2>/dev/null | tr -d '\n ')"
+          echo "latest provenance: $(npm view "$name" dist.attestations --json 2>/dev/null | tr -d '\n ')"
