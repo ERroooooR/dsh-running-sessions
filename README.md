@@ -35,7 +35,7 @@ plugin_manager install_bundle(target="<本仓库的绝对路径>")
 
 装完 `Ctrl+R` 重载（web 端硬刷新 `Ctrl+Shift+R`）。
 
-> npm 包名 `dsh-running-sessions` 已预留、**尚未发布**；发布后可用 `dsh plugin add dsh-running-sessions`。
+也可以从 npm 装：`dsh plugin add dsh-running-sessions`。
 
 ## 使用
 

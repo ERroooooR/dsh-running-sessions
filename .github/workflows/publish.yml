@@ -1,6 +1,6 @@
 name: Publish
 
-# Tagging is the release action: `git tag v1.3.1 && git push origin v1.3.1`.
+# Tagging is the release action: `git tag v1.3.4 && git push origin v1.3.4`.
 # Nothing is published from a branch push, and a tag that disagrees with
 # package.json fails before the registry is touched.
 on:
@@ -10,7 +10,7 @@ on:
 
 permissions:
   contents: write # create the GitHub Release
-  id-token: write # npm trusted publishing + provenance
+  id-token: write # provenance attestation (works with either auth path)
 
 jobs:
   publish:
@@ -18,17 +18,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # No registry-url here: it writes an .npmrc pointing at _authToken, and this
+      # job decides per-run whether a token exists at all. The .npmrc is written
+      # below only when it is needed.
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          # No registry-url: it writes an .npmrc with an empty _authToken, which
-          # makes npm look for a token instead of doing the OIDC exchange.
 
-      # Trusted publishing needs npm 11.5.1+; the CLI bundled with Node 22 is
-      # older than that and would fall back to looking for a token. Pinned to the
-      # major rather than `@latest` so a release does not change npm out from under
-      # itself — npm 12 already reshaped `pack --json`, which `check:pack` handles.
-      - name: Upgrade npm for trusted publishing
+      # Trusted publishing needs npm >= 11.5.1 and `npm stage` needs >= 11.15; the
+      # CLI bundled with Node 22 is older than both. Pinned to the major rather than
+      # `@latest` so a release does not change npm out from under itself.
+      - name: Upgrade npm
         run: npm install --global npm@11
 
       - name: Check the tag matches package.json
@@ -48,17 +48,36 @@ jobs:
       - name: Verify the published tarball contents
         run: npm run check:pack
 
-      # Distinguishes the two ways trusted publishing can fail: no OIDC token in
-      # this job at all, versus a token the registry has no trusted relationship
-      # for (which surfaces as ENEEDAUTH from `npm publish`).
-      - name: Report the publishing identity
+      - name: Report the available credentials
+        id: auth
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           echo "npm $(npm --version), node $(node --version)"
           if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
             echo "OIDC request URL: available"
           else
-            echo "::error::OIDC request URL is missing — id-token: write did not reach this job"
-            exit 1
+            echo "OIDC request URL: missing"
+          fi
+          if [ -n "${NPM_TOKEN:-}" ]; then
+            # npm reads NODE_AUTH_TOKEN only through an .npmrc, so write one.
+            printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" > "$HOME/.npmrc"
+            set +e
+            who="$(npm whoami 2>&1)"
+            status=$?
+            set -e
+            if [ "$status" -eq 0 ]; then
+              echo "NPM_TOKEN: authenticated as $who"
+              echo "token=usable" >> "$GITHUB_OUTPUT"
+            else
+              echo "::warning::NPM_TOKEN is present but rejected; falling back to OIDC."
+              echo "$who"
+              rm -f "$HOME/.npmrc"
+              echo "token=rejected" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "NPM_TOKEN: absent; using OIDC only."
+            echo "token=absent" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Is this version already on npm?
@@ -73,51 +92,71 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # No NODE_AUTH_TOKEN on purpose: trusted publishing does the OIDC exchange,
-      # so the job publishes as this repository rather than as a long-lived secret.
-      # Configure it at npmjs.com → package → Settings → Trusted publishing, with
-      # repository ERroooooR/dsh-running-sessions and workflow filename publish.yml.
+      # Two working auth paths, tried in the order that has actually shipped a
+      # release here:
       #
-      # A trusted publisher created after 2026-09-03 allows only `npm stage
-      # publish` until the maintainer ticks "npm publish" on that entry. Both are
-      # handled here: publish directly when allowed, otherwise stage the version so
-      # a maintainer can approve it with one 2FA click. Staging is not a failure —
-      # the artifact is built and signed either way.
+      #   1. NPM_TOKEN  — a granular token with publish rights on this package. This
+      #      is how 1.3.1 reached the registry, provenance included.
+      #   2. OIDC        — no long-lived secret. A trusted publisher created after
+      #      2026-09-03 defaults to `npm stage publish` only, so a direct publish
+      #      can be refused with `OIDC permission denied for this action`; that
+      #      exact refusal means "stage it instead", which still needs one 2FA
+      #      approval by a maintainer.
+      #
+      # Any other error is real and must not be papered over.
       - name: Publish to npm
         id: publish
         if: steps.probe.outputs.skip != 'true'
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          set +e
-          direct="$(npm publish --access public --provenance 2>&1)"
-          status=$?
-          set -e
-          printf '%s\n' "$direct"
+          publish_once() {
+            set +e
+            out="$("$@" 2>&1)"
+            status=$?
+            set -e
+            printf '%s\n' "$out"
+            return $status
+          }
 
-          if [ "$status" -eq 0 ]; then
+          if [ "${{ steps.auth.outputs.token }}" = "usable" ]; then
+            echo "::notice::Publishing with NPM_TOKEN."
+            if publish_once npm publish --access public --provenance; then
+              echo "mode=published" >> "$GITHUB_OUTPUT"
+              echo "via=token" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "::error::npm publish with NPM_TOKEN failed."
+            exit 1
+          fi
+
+          echo "::notice::No usable token; trying OIDC direct publish."
+          if publish_once npm publish --access public --provenance; then
             echo "mode=published" >> "$GITHUB_OUTPUT"
+            echo "via=oidc" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          # Only this exact refusal means "the trusted publisher is stage-only".
-          # Anything else is a real error and must not be papered over.
-          if ! printf '%s' "$direct" | grep -q 'OIDC permission denied for this action'; then
-            exit "$status"
+          if ! printf '%s' "$out" | grep -q 'OIDC permission denied for this action'; then
+            echo "::error::OIDC publish failed for a reason other than a stage-only trusted publisher."
+            exit 1
           fi
 
-          echo "::notice::This trusted publisher allows staged publishing only; staging $version for approval."
-          staged="$(npm stage publish --access public --provenance 2>&1)" || {
-            # Re-running a tag must not fail merely because the version is already
-            # sitting in the staging area.
-            if printf '%s' "$staged" | grep -qi 'already'; then
-              printf '%s\n' "$staged"
-              echo "mode=staged" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            printf '%s\n' "$staged" >&2
-            exit 1
-          }
-          printf '%s\n' "$staged"
-          echo "mode=staged" >> "$GITHUB_OUTPUT"
+          echo "::notice::This trusted publisher allows staged publishing only; staging for approval."
+          if publish_once npm stage publish --access public --provenance; then
+            echo "mode=staged" >> "$GITHUB_OUTPUT"
+            echo "via=oidc" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Re-running a tag must not fail merely because the version is already
+          # sitting in the staging area.
+          if printf '%s' "$out" | grep -qi 'already'; then
+            echo "mode=staged" >> "$GITHUB_OUTPUT"
+            echo "via=oidc" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "::error::npm stage publish failed."
+          exit 1
 
       - name: Explain what happened
         if: steps.publish.outputs.mode != ''
@@ -125,6 +164,8 @@ jobs:
           version="$(node -p "require('./package.json').version")"
           {
             echo "### npm publish: ${{ steps.publish.outputs.mode }}"
+            echo
+            echo "Authenticated with: \`${{ steps.publish.outputs.via }}\`"
             echo
             if [ "${{ steps.publish.outputs.mode }}" = "published" ]; then
               echo "\`dsh-running-sessions@$version\` is live on npm."
@@ -136,29 +177,26 @@ jobs:
               echo "Or from a machine that is logged in and has npm >= 11.15 — the id comes from \`npm stage list\`:"
               echo
               echo '```sh'
-              echo "npm stage list dsh-running-sessions   # prints the staged version and its stage id"
+              echo "npm stage list dsh-running-sessions"
               echo "npm stage approve <stage-id>"
               echo '```'
               echo
-              echo "To make future releases publish directly, tick **npm publish** under"
-              echo "Settings → Trusted publishing → Allowed actions."
+              echo "To publish directly in future, either tick **npm publish** under"
+              echo "Settings → Trusted publishing → Allowed actions, or keep \`NPM_TOKEN\` set."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       # A version-free asset name keeps
       # https://github.com/.../releases/latest/download/dsh-running-sessions.tgz
       # working across releases; a versioned name would 404 the day the next
-      # release is cut. Packed before the registry is touched, and re-packed on
-      # every run: if the publish succeeds and a later step fails, a re-run has to
-      # be able to finish the release instead of skipping past it.
+      # release is cut. Packed and re-uploaded on every run, so a re-run can finish
+      # a release whose publish step already succeeded.
       - name: Pack a tarball for the GitHub Release
         run: |
           mkdir -p release
           npm pack --pack-destination release
           mv release/*.tgz release/dsh-running-sessions.tgz
 
-      # The GitHub Release is reconciled on every run, including one where npm was
-      # already updated by a previous attempt.
       - name: Create or refresh the GitHub Release
         if: github.event_name == 'push'
         env:
