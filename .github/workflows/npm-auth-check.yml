@@ -32,43 +32,45 @@ jobs:
           fi
           echo "manifest: $(node -p "require('./package.json').name")@$(node -p "require('./package.json').version")"
 
-      # npm only uses NODE_AUTH_TOKEN when an .npmrc refers to it, so the test
-      # would report a false negative without this file.
-      - name: Does the repository secret still authenticate?
-        id: token
+      # npm only reads NODE_AUTH_TOKEN through an .npmrc, so the check needs one.
+      - name: What the repository secret is allowed to do
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           if [ -z "${NPM_TOKEN:-}" ]; then
             echo "NPM_TOKEN: empty or absent"
-            echo "result=absent" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          echo "NPM_TOKEN: present (${#NPM_TOKEN} chars)"
+          echo "NPM_TOKEN: present (${#NPM_TOKEN} chars), prefix '${NPM_TOKEN:0:4}…'"
+          printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" > "$HOME/.npmrc"
+
+          probe() {
+            set +e
+            local out
+            out="$("$@" 2>&1)"
+            local status=$?
+            set -e
+            echo "--- npm $* (exit $status)"
+            printf '%s\n' "$out" | head -25
+          }
+
+          probe npm whoami
+          probe npm access list packages
+          probe npm trust list dsh-running-sessions --json
+
+      # --dry-run: describes the relationship npm would create without touching it.
+      - name: Trust relationship, as npm sees it
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
           printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" > "$HOME/.npmrc"
           set +e
-          out="$(npm whoami 2>&1)"
-          status=$?
+          npm trust github dsh-running-sessions \
+            --file publish.yml \
+            --repository ERroooooR/dsh-running-sessions \
+            --dry-run --json 2>&1 | head -40
+          echo "(dry-run exit above)"
           set -e
-          echo "npm whoami exit=$status"
-          echo "$out"
-          if [ "$status" -eq 0 ]; then
-            echo "result=ok" >> "$GITHUB_OUTPUT"
-          else
-            echo "result=rejected" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Registry view of the trusted publishers
-        if: steps.token.outputs.result == 'ok'
-        run: |
-          set +e
-          npm trust list dsh-running-sessions --json
-          status=$?
-          set -e
-          echo "npm trust list exit=$status"
-          if [ "$status" -ne 0 ]; then
-            echo "::warning::npm trust list failed with exit $status"
-          fi
 
       - name: Registry state of this package
         run: |
@@ -82,4 +84,3 @@ jobs:
           fi
           echo "published versions: $(npm view "$name" versions --json 2>/dev/null | tr -d '\n ')"
           echo "dist-tags: $(npm view "$name" dist-tags --json 2>/dev/null | tr -d '\n ')"
-          echo "latest provenance: $(npm view "$name" dist.attestations --json 2>/dev/null | tr -d '\n ')"
